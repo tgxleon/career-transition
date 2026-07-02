@@ -32,9 +32,11 @@ npm run dev                  # http://localhost:3000
 
 Then:
 
-1. Open **Profile & Settings** and paste your **master resume** (and,
-   optionally, your career-transition story). Every AI feature uses these as
-   its only source of truth — nothing is ever invented beyond them.
+1. Open **Profile & Settings** and add your **master resume** — upload it as
+   a **PDF, DOCX, TXT or MD** file (text is extracted automatically) or paste
+   it directly — plus, optionally, your career-transition story. Every AI
+   feature uses these as its only source of truth — nothing is ever invented
+   beyond them.
 2. Add a job on the **Jobs** page and paste the full job description.
 3. Work through the tabs on the job page: **Fit Analysis → Resume → Cover
    Letter → Interview Prep → Reflection → Emails**.

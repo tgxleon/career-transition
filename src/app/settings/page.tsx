@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { Profile } from "@/lib/types";
 
@@ -19,6 +19,33 @@ export default function SettingsPage() {
   const { profile, setProfile, ready } = useStore();
   const [draft, setDraft] = useState<Profile>(profile);
   const [saved, setSaved] = useState(false);
+  const [uploadState, setUploadState] = useState<
+    { status: "idle" } | { status: "busy" } | { status: "done"; note: string } | { status: "error"; note: string }
+  >({ status: "idle" });
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const uploadResume = async (file: File) => {
+    setUploadState({ status: "busy" });
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/extract", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      setDraft((d) => ({ ...d, masterResume: data.text }));
+      setUploadState({
+        status: "done",
+        note: `Extracted ${data.chars.toLocaleString()} characters from ${data.filename} — review below, then Save.`,
+      });
+    } catch (err) {
+      setUploadState({
+        status: "error",
+        note: err instanceof Error ? err.message : "Upload failed",
+      });
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (ready) setDraft(profile);
@@ -68,10 +95,44 @@ export default function SettingsPage() {
           </div>
         </div>
         <div>
-          <label className="label">
-            Master resume * (paste the full text — used as the single source of
-            truth for tailoring)
-          </label>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <label className="label !mb-0">
+              Master resume * (the single source of truth everything is
+              analysed and tailored against)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadResume(f);
+                }}
+              />
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                disabled={uploadState.status === "busy"}
+                onClick={() => fileRef.current?.click()}
+              >
+                {uploadState.status === "busy"
+                  ? "Extracting…"
+                  : "⬆ Upload resume (PDF / DOCX / TXT)"}
+              </button>
+            </div>
+          </div>
+          {uploadState.status === "done" && (
+            <p className="mb-2 text-xs font-medium text-emerald-700">
+              ✓ {uploadState.note}
+            </p>
+          )}
+          {uploadState.status === "error" && (
+            <p className="mb-2 text-xs font-medium text-red-700">
+              {uploadState.note}
+            </p>
+          )}
           <textarea
             className="input min-h-72 font-mono text-xs"
             value={draft.masterResume}
