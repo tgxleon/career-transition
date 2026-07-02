@@ -16,6 +16,8 @@ import {
   ReflectionContext,
 } from "@/lib/prompts";
 
+import { checkRateLimit, clientIp } from "@/lib/ratelimit";
+
 export const maxDuration = 300;
 
 const MODEL = "claude-opus-4-8";
@@ -122,6 +124,16 @@ export async function POST(req: NextRequest) {
           "ANTHROPIC_API_KEY is not configured on the server. Copy .env.example to .env.local and add your key.",
       },
       { status: 500 }
+    );
+  }
+
+  const rate = checkRateLimit(clientIp(req.headers));
+  if (!rate.ok) {
+    return NextResponse.json(
+      {
+        error: `You've hit the AI usage limit for now — try again in about ${rate.retryAfterMinutes} minute(s).`,
+      },
+      { status: 429 }
     );
   }
 
