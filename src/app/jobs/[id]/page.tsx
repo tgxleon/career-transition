@@ -7,29 +7,33 @@ import { useStore } from "@/lib/store";
 import StageBadge from "@/components/StageBadge";
 import OverviewTab from "@/components/job/OverviewTab";
 import FitTab from "@/components/job/FitTab";
-import ResumeTab from "@/components/job/ResumeTab";
-import CoverLetterTab from "@/components/job/CoverLetterTab";
-import PrepTab from "@/components/job/PrepTab";
-import ReflectionTab from "@/components/job/ReflectionTab";
+import ResumeCoverTab from "@/components/job/ResumeCoverTab";
+import InterviewTab from "@/components/job/InterviewTab";
 import EmailsTab from "@/components/job/EmailsTab";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "fit", label: "Fit Analysis" },
-  { id: "resume", label: "Resume" },
-  { id: "cover", label: "Cover Letter" },
-  { id: "prep", label: "Interview Prep" },
-  { id: "reflection", label: "Reflection" },
-  { id: "emails", label: "Emails" },
+  { id: "resume", label: "Resume & Cover Letter" },
+  { id: "interview", label: "Interview" },
+  { id: "emails", label: "Email Drafts" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+// Old bookmarked/linked tab ids from the previous 7-tab layout
+const LEGACY_TABS: Record<string, TabId> = {
+  cover: "resume",
+  prep: "interview",
+  reflection: "interview",
+};
 
 function JobDetailInner({ id }: { id: string }) {
   const { jobs, ready, profile } = useStore();
   const params = useSearchParams();
   const router = useRouter();
-  const initial = (params.get("tab") as TabId) || "overview";
+  const raw = params.get("tab") ?? "overview";
+  const initial = (LEGACY_TABS[raw] ?? raw) as TabId;
   const [tab, setTab] = useState<TabId>(
     TABS.some((t) => t.id === initial) ? initial : "overview"
   );
@@ -49,10 +53,8 @@ function JobDetailInner({ id }: { id: string }) {
 
   const artifactDone: Partial<Record<TabId, boolean>> = {
     fit: !!job.fit,
-    resume: !!job.tailoredResume,
-    cover: !!job.coverLetter,
-    prep: !!job.interviewPrep,
-    reflection: !!job.reflection,
+    resume: !!(job.tailoredResume || job.coverLetter),
+    interview: !!(job.interviewPrep || job.reflection),
     emails: !!(job.thankYouEmail || job.followUpEmail),
   };
 
@@ -118,10 +120,8 @@ function JobDetailInner({ id }: { id: string }) {
 
       {tab === "overview" && <OverviewTab job={job} />}
       {tab === "fit" && <FitTab job={job} />}
-      {tab === "resume" && <ResumeTab job={job} />}
-      {tab === "cover" && <CoverLetterTab job={job} />}
-      {tab === "prep" && <PrepTab job={job} />}
-      {tab === "reflection" && <ReflectionTab job={job} />}
+      {tab === "resume" && <ResumeCoverTab job={job} />}
+      {tab === "interview" && <InterviewTab job={job} />}
       {tab === "emails" && <EmailsTab job={job} />}
     </div>
   );

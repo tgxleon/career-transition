@@ -164,7 +164,7 @@ export default function Dashboard() {
               {interviews.map((j) => (
                 <li key={j.id} className="py-2">
                   <Link
-                    href={`/jobs/${j.id}?tab=prep`}
+                    href={`/jobs/${j.id}?tab=interview`}
                     className="flex items-center justify-between gap-3 hover:text-indigo-700"
                   >
                     <div>
