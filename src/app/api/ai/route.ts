@@ -252,11 +252,26 @@ export async function POST(req: NextRequest) {
                 ),
               },
             ],
-            output_config: { format: zodOutputFormat(PrepSchema) },
+            // medium effort: drafting doesn't need deep deliberation, and it
+            // stops the model's thinking from starving the output budget —
+            // the cause of packs arriving with empty tail sections.
+            output_config: {
+              effort: "medium",
+              format: zodOutputFormat(PrepSchema),
+            },
           }
         );
         if (response.stop_reason === "refusal") {
           return refusal();
+        }
+        if (response.stop_reason === "max_tokens") {
+          return NextResponse.json(
+            {
+              error:
+                "The generation ran out of space before finishing — please try again.",
+            },
+            { status: 502 }
+          );
         }
         const prep = response.parsed_output;
         // Guard against budget-starved output: never hand back a pack with
@@ -355,6 +370,9 @@ export async function POST(req: NextRequest) {
           model: MODEL,
           max_tokens: 16000,
           thinking: { type: "adaptive" },
+          // drafting tasks: medium effort keeps quality but cuts thinking
+          // time sharply, so requests stay inside serverless time limits
+          output_config: { effort: "medium" },
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: prompt }],
         });

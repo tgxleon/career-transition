@@ -46,7 +46,17 @@ export function useAi<T>() {
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
       return data.data as T;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      const message = err instanceof Error ? err.message : "Request failed";
+      // fetch() rejects with a bare TypeError when the connection drops —
+      // usually the generation outlived the serverless time limit or the
+      // network blipped mid-request.
+      if (/failed to fetch|load failed|networkerror/i.test(message)) {
+        setError(
+          "The connection dropped before the result arrived — this usually means the generation took too long. Please try again; if it keeps happening on this job, shorten the pasted job description a little."
+        );
+      } else {
+        setError(message);
+      }
       return null;
     } finally {
       setLoading(false);
