@@ -210,7 +210,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const client = new Anthropic();
+  // The timeout must be set at CLIENT level: the SDK's "streaming required"
+  // guard for large max_tokens only checks the client-level timeout, not
+  // per-request options. 280s stays inside Vercel's 300s function cap.
+  const client = new Anthropic({ timeout: 280_000 });
 
   try {
     switch (body.task) {
@@ -250,8 +253,7 @@ export async function POST(req: NextRequest) {
               },
             ],
             output_config: { format: zodOutputFormat(PrepSchema) },
-          },
-          { timeout: 280_000 }
+          }
         );
         if (response.stop_reason === "refusal") {
           return refusal();
