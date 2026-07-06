@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useStore } from "@/lib/store";
 
 const LINKS = [
-  { href: "/", label: "Dashboard" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/jobs", label: "Jobs" },
   { href: "/reminders", label: "Reminders" },
   { href: "/settings", label: "Profile & Settings" },
@@ -14,6 +14,8 @@ const LINKS = [
 export default function Nav() {
   const pathname = usePathname();
   const { reminders, ready } = useStore();
+  // The marketing landing page at "/" ships its own header.
+  if (pathname === "/") return null;
   const now = new Date();
   const dueCount = ready
     ? reminders.filter((r) => !r.done && new Date(r.due) <= now).length
@@ -22,7 +24,7 @@ export default function Nav() {
   return (
     <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/dashboard" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-700 text-sm font-bold text-white">
             CC
           </span>
