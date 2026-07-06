@@ -1,12 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
 import { Job, KnockoutCheck, ResumeAudit } from "@/lib/types";
 import { jobContext, profileContext, useAi } from "@/lib/ai-client";
+import { downloadDocx, downloadPdf, safeFilename } from "@/lib/resume-export";
 import Markdown from "@/components/Markdown";
 import CopyButton from "@/components/CopyButton";
+
+function DownloadButtons({ md, filename }: { md: string; filename: string }) {
+  const [busy, setBusy] = useState<"" | "docx" | "pdf">("");
+  const make = (kind: "docx" | "pdf") => async () => {
+    setBusy(kind);
+    try {
+      if (kind === "docx") await downloadDocx(md, filename);
+      else await downloadPdf(md, filename);
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <>
+      <button
+        className="btn-secondary text-xs"
+        onClick={make("docx")}
+        disabled={busy !== ""}
+        title="Download as Word document (best for ATS portals)"
+      >
+        {busy === "docx" ? "…" : "⬇ DOCX"}
+      </button>
+      <button
+        className="btn-secondary text-xs"
+        onClick={make("pdf")}
+        disabled={busy !== ""}
+        title="Download as PDF"
+      >
+        {busy === "pdf" ? "…" : "⬇ PDF"}
+      </button>
+    </>
+  );
+}
 
 const KNOCKOUT_STYLE: Record<KnockoutCheck["status"], string> = {
   met: "bg-emerald-50 text-emerald-800",
@@ -68,6 +102,25 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
   const resume = job.tailoredResume;
   const letter = job.coverLetter;
   const audit = job.resumeAudit;
+  const exportName = safeFilename(`${job.company} ${job.role}`) || "resume";
+
+  // Punch-list selection: all fixes selected by default on each new audit
+  const [uncheckedFixes, setUncheckedFixes] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    setUncheckedFixes(new Set());
+  }, [audit?.generatedAt]);
+  const selectedCount = audit
+    ? audit.punchList.length - uncheckedFixes.size
+    : 0;
+
+  const toggleFix = (i: number) => {
+    setUncheckedFixes((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
 
   const generateResume = async (applyPunchList = false) => {
     const data = await resumeAi.run({
@@ -84,7 +137,9 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
       // Auditor punch list from Step 3, when regenerating to apply fixes
       punchList:
         applyPunchList && audit
-          ? audit.punchList.map((p) => `[${p.priority}] ${p.fix}`)
+          ? audit.punchList
+              .filter((_, i) => !uncheckedFixes.has(i))
+              .map((p) => `[${p.priority}] ${p.fix}`)
           : undefined,
     });
     if (data) {
@@ -150,8 +205,9 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {resume && <CopyButton text={resume} />}
+          {resume && <DownloadButtons md={resume} filename={`${exportName}-resume`} />}
           {resume && (
             <button
               className="btn-secondary text-xs"
@@ -324,33 +380,52 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
               {audit.punchList.length > 0 && (
                 <div>
                   <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Punch list — final fixes
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Punch list — final fixes
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        Untick anything you don&apos;t want applied.
+                      </p>
                     </div>
                     <button
                       className="btn-secondary text-xs"
                       onClick={() => generateResume(true)}
-                      disabled={resumeAi.loading}
+                      disabled={resumeAi.loading || selectedCount === 0}
                     >
                       {resumeAi.loading
                         ? "Applying…"
-                        : "Apply punch list & regenerate"}
+                        : `Apply ${selectedCount} selected ${
+                            selectedCount === 1 ? "fix" : "fixes"
+                          } & regenerate`}
                     </button>
                   </div>
                   <ul className="space-y-2">
-                    {audit.punchList.map((p, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start gap-2 rounded-lg bg-gray-50 p-3"
-                      >
-                        <span
-                          className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${PRIORITY_STYLE[p.priority]}`}
-                        >
-                          {p.priority}
-                        </span>
-                        <span className="text-sm">{p.fix}</span>
-                      </li>
-                    ))}
+                    {audit.punchList.map((p, i) => {
+                      const checked = !uncheckedFixes.has(i);
+                      return (
+                        <li key={i}>
+                          <label
+                            className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
+                              checked ? "bg-gray-50" : "bg-white opacity-50 ring-1 ring-gray-100"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleFix(i)}
+                              className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-700 focus:ring-indigo-500"
+                            />
+                            <span
+                              className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${PRIORITY_STYLE[p.priority]}`}
+                            >
+                              {p.priority}
+                            </span>
+                            <span className="text-sm">{p.fix}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -394,8 +469,11 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
                 career-transition framing included.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {letter && <CopyButton text={letter} />}
+              {letter && (
+                <DownloadButtons md={letter} filename={`${exportName}-cover-letter`} />
+              )}
               {letter && (
                 <button
                   className="btn-secondary text-xs"
