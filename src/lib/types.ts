@@ -75,6 +75,8 @@ export interface ResumeAudit {
   knockouts: KnockoutCheck[];
   punchList: { priority: "high" | "medium" | "low"; fix: string }[];
   generatedAt: string;
+  /** true once the resume has been regenerated after this audit ran */
+  stale?: boolean;
 }
 
 export interface StarStory {
@@ -145,6 +147,8 @@ export interface Job {
   fit?: FitAnalysis;
   tailoredResume?: string;
   resumeAudit?: ResumeAudit;
+  /** audit fixes that were folded into the current tailoredResume draft */
+  appliedFixes?: string[];
   coverLetter?: string;
   interviewPrep?: InterviewPrep;
   reflection?: Reflection;

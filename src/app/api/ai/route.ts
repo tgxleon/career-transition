@@ -21,7 +21,9 @@ import { checkRateLimit, clientIp } from "@/lib/ratelimit";
 
 export const maxDuration = 300;
 
-const MODEL = "claude-opus-4-8";
+// Model is configurable: set ANTHROPIC_MODEL=claude-sonnet-5 for ~60% lower
+// cost per generation with near-Opus quality on drafting work.
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 
 const KnockoutSchema = z.object({
   requirement: z.string(),

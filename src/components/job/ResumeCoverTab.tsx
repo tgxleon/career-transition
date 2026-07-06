@@ -58,7 +58,8 @@ function Stepper({ job }: { job: Job }) {
   const steps = [
     { n: 1, label: "Analyse fit", done: !!job.fit },
     { n: 2, label: "Tailor resume", done: !!job.tailoredResume },
-    { n: 3, label: "Final audit", done: !!job.resumeAudit },
+    // a stale audit belongs to a previous draft — step 3 is no longer done
+    { n: 3, label: "Final audit", done: !!job.resumeAudit && !job.resumeAudit.stale },
   ];
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -143,8 +144,19 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           : undefined,
     });
     if (data) {
-      // A new draft invalidates the previous audit
-      updateJob(job.id, { tailoredResume: data, resumeAudit: undefined });
+      // Keep the previous audit visible but mark it stale (it audited the
+      // old draft), and record which fixes went into this draft.
+      const appliedNow =
+        applyPunchList && audit
+          ? audit.punchList
+              .filter((_, i) => !uncheckedFixes.has(i))
+              .map((p) => p.fix)
+          : undefined;
+      updateJob(job.id, {
+        tailoredResume: data,
+        resumeAudit: audit ? { ...audit, stale: true } : undefined,
+        appliedFixes: appliedNow,
+      });
     }
   };
 
@@ -251,6 +263,26 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           </div>
         ))}
 
+      {/* Record of fixes folded into the current draft */}
+      {resume && (job.appliedFixes?.length ?? 0) > 0 && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="text-sm font-semibold text-emerald-900">
+            ✓ This draft incorporated {job.appliedFixes!.length} audit{" "}
+            {job.appliedFixes!.length === 1 ? "fix" : "fixes"}
+          </div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-900/90">
+            {job.appliedFixes!.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-emerald-800/80">
+            Exactly what changed for each fix is listed under{" "}
+            <strong>Tailoring notes → Fixes applied</strong> at the bottom of
+            the resume above. Re-run the audit below to verify they landed.
+          </p>
+        </div>
+      )}
+
       {/* Final audit — the strict check before applying */}
       {resume && (
         <div className="card space-y-4">
@@ -273,11 +305,21 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
             >
               {auditAi.loading
                 ? "Auditing…"
-                : audit
-                  ? "Re-run audit"
-                  : "Run final audit"}
+                : audit?.stale
+                  ? "Audit the new draft"
+                  : audit
+                    ? "Re-run audit"
+                    : "Run final audit"}
             </button>
           </div>
+
+          {audit?.stale && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <strong>This audit is for the previous draft.</strong> The resume
+              has been regenerated since it ran, so the findings below may
+              already be fixed. Run <em>Audit the new draft</em> to verify.
+            </div>
+          )}
 
           {auditAi.error && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -383,39 +425,50 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                         Punch list — final fixes
+                        {audit.stale && " (previous draft)"}
                       </div>
-                      <p className="text-xs text-gray-400">
-                        Untick anything you don&apos;t want applied.
-                      </p>
+                      {!audit.stale && (
+                        <p className="text-xs text-gray-400">
+                          Untick anything you don&apos;t want applied.
+                        </p>
+                      )}
                     </div>
-                    <button
-                      className="btn-secondary text-xs"
-                      onClick={() => generateResume(true)}
-                      disabled={resumeAi.loading || selectedCount === 0}
-                    >
-                      {resumeAi.loading
-                        ? "Applying…"
-                        : `Apply ${selectedCount} selected ${
-                            selectedCount === 1 ? "fix" : "fixes"
-                          } & regenerate`}
-                    </button>
+                    {!audit.stale && (
+                      <button
+                        className="btn-secondary text-xs"
+                        onClick={() => generateResume(true)}
+                        disabled={resumeAi.loading || selectedCount === 0}
+                      >
+                        {resumeAi.loading
+                          ? "Applying…"
+                          : `Apply ${selectedCount} selected ${
+                              selectedCount === 1 ? "fix" : "fixes"
+                            } & regenerate`}
+                      </button>
+                    )}
                   </div>
-                  <ul className="space-y-2">
+                  <ul className={`space-y-2 ${audit.stale ? "opacity-50" : ""}`}>
                     {audit.punchList.map((p, i) => {
                       const checked = !uncheckedFixes.has(i);
                       return (
                         <li key={i}>
                           <label
-                            className={`flex cursor-pointer items-start gap-3 rounded-lg p-3 transition-colors ${
-                              checked ? "bg-gray-50" : "bg-white opacity-50 ring-1 ring-gray-100"
+                            className={`flex items-start gap-3 rounded-lg p-3 transition-colors ${
+                              audit.stale
+                                ? "bg-gray-50"
+                                : checked
+                                  ? "cursor-pointer bg-gray-50"
+                                  : "cursor-pointer bg-white opacity-50 ring-1 ring-gray-100"
                             }`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleFix(i)}
-                              className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-700 focus:ring-indigo-500"
-                            />
+                            {!audit.stale && (
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleFix(i)}
+                                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-700 focus:ring-indigo-500"
+                              />
+                            )}
                             <span
                               className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ${PRIORITY_STYLE[p.priority]}`}
                             >

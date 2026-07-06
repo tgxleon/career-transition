@@ -114,6 +114,8 @@ ${
       ? `<audit_punch_list>
 A previous audit of the last draft flagged these fixes — apply them:
 ${punchList.map((p) => `- ${p}`).join("\n")}
+
+In the Tailoring notes section, start with a "### Fixes applied" list: one line per requested fix stating exactly what you changed for it (or why it couldn't be applied honestly).
 </audit_punch_list>`
       : ""
   }
