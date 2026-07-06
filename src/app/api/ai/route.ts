@@ -176,6 +176,10 @@ interface AiRequest {
   punchList?: string[];
   /** The tailored resume text to audit */
   resume?: string;
+  /** Existing prep pack, for refinement requests */
+  currentPrep?: unknown;
+  /** User's instruction describing what to change in the prep pack */
+  refinement?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -225,19 +229,24 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ data: response.parsed_output });
       }
       case "interview_prep": {
-        // Kept at 16000 non-streaming: larger budgets trip the SDK's
-        // "streaming required" guard, and Vercel caps the function at 300s
-        // anyway. The explicit timeout stays inside that cap.
+        // The prep pack is the largest artifact: give it a big output budget.
+        // The explicit timeout suppresses the SDK's streaming guard and stays
+        // inside Vercel's 300s function cap.
         const response = await client.messages.parse(
           {
             model: MODEL,
-            max_tokens: 16000,
+            max_tokens: 32000,
             thinking: { type: "adaptive" },
             system: SYSTEM_PROMPT,
             messages: [
               {
                 role: "user",
-                content: interviewPrepPrompt(body.job, body.profile),
+                content: interviewPrepPrompt(
+                  body.job,
+                  body.profile,
+                  body.currentPrep ? JSON.stringify(body.currentPrep) : undefined,
+                  body.refinement
+                ),
               },
             ],
             output_config: { format: zodOutputFormat(PrepSchema) },
@@ -247,7 +256,25 @@ export async function POST(req: NextRequest) {
         if (response.stop_reason === "refusal") {
           return refusal();
         }
-        return NextResponse.json({ data: response.parsed_output });
+        const prep = response.parsed_output;
+        // Guard against budget-starved output: never hand back a pack with
+        // hollowed-out tail sections.
+        if (
+          !prep ||
+          prep.stories.length === 0 ||
+          prep.likelyQuestions.length === 0 ||
+          prep.difficultQuestions.length === 0 ||
+          prep.questionsForInterviewer.length === 0
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "The prep pack came back incomplete — please try generating again.",
+            },
+            { status: 502 }
+          );
+        }
+        return NextResponse.json({ data: prep });
       }
       case "vibe_check": {
         const response = await client.messages.parse({

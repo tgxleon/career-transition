@@ -176,8 +176,27 @@ Requirements:
 
 export function interviewPrepPrompt(
   job: JobContext,
-  profile: ProfileContext
+  profile: ProfileContext,
+  currentPrep?: string,
+  refinement?: string
 ): string {
+  if (currentPrep && refinement) {
+    return `The candidate has an interview preparation pack and wants specific parts amended. Apply ONLY the requested changes; reproduce every other field of the pack unchanged (same stories, same questions, same wording).
+
+${jobBlock(job)}
+
+${profileBlock(profile)}
+
+<current_prep_pack>
+${currentPrep}
+</current_prep_pack>
+
+<requested_changes>
+${refinement}
+</requested_changes>
+
+Output the complete updated pack. Every list must remain fully populated — never return an empty list.`;
+  }
   return `Build an interview preparation pack for this candidate and job.
 
 ${jobBlock(job)}
@@ -190,7 +209,9 @@ Include:
 3. 6–10 likely interview questions for THIS role (mix behavioural/fit, scenario-based, and role-specific technical or domain questions) with a recommended approach for each.
 4. Case-study / scenario interview guidance if this role type typically uses them (frameworks to structure answers, what interviewers look for) — otherwise general scenario-question guidance.
 5. 4–6 difficult questions this specific candidate should expect (gaps, career change, "why are you leaving", salary, weaknesses grounded in their actual profile), each with why it's hard for them, a strategy, and a sample answer.
-6. 5–7 sharp questions the candidate should ask the interviewers (specific to this company/role, not generic).`;
+6. 5–7 sharp questions the candidate should ask the interviewers (specific to this company/role, not generic).
+
+Every section is mandatory and every list must be populated — in particular, sections 5 and 6 must never be empty. Keep individual entries tight rather than dropping later sections; the last two sections matter as much as the first.`;
 }
 
 export function vibeCheckPrompt(

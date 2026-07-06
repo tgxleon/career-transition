@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { InterviewPrep, Job } from "@/lib/types";
 import { jobContext, profileContext, useAi } from "@/lib/ai-client";
@@ -8,6 +9,9 @@ import Markdown from "@/components/Markdown";
 export default function PrepTab({ job }: { job: Job }) {
   const { profile, updateJob } = useStore();
   const { run, loading, error } = useAi<Omit<InterviewPrep, "generatedAt">>();
+  const refine = useAi<Omit<InterviewPrep, "generatedAt">>();
+  const [refinement, setRefinement] = useState("");
+  const [refined, setRefined] = useState(false);
 
   const generate = async () => {
     const data = await run({
@@ -19,6 +23,26 @@ export default function PrepTab({ job }: { job: Job }) {
       updateJob(job.id, {
         interviewPrep: { ...data, generatedAt: new Date().toISOString() },
       });
+    }
+  };
+
+  const applyRefinement = async () => {
+    if (!job.interviewPrep || !refinement.trim()) return;
+    const { generatedAt: _g, ...currentPrep } = job.interviewPrep;
+    const data = await refine.run({
+      task: "interview_prep",
+      job: jobContext(job),
+      profile: profileContext(profile),
+      currentPrep,
+      refinement: refinement.trim(),
+    });
+    if (data) {
+      updateJob(job.id, {
+        interviewPrep: { ...data, generatedAt: new Date().toISOString() },
+      });
+      setRefinement("");
+      setRefined(true);
+      setTimeout(() => setRefined(false), 3000);
     }
   };
 
@@ -168,6 +192,44 @@ export default function PrepTab({ job }: { job: Job }) {
                 <li key={i}>{q}</li>
               ))}
             </ol>
+          </section>
+
+          {/* Refine — targeted amendments without regenerating from scratch */}
+          <section className="card space-y-3">
+            <div>
+              <h3 className="font-semibold">Refine this pack</h3>
+              <p className="text-sm text-gray-500">
+                Describe what to change — only that part is amended, everything
+                else stays as it is.
+              </p>
+            </div>
+            <textarea
+              className="input min-h-24"
+              value={refinement}
+              onChange={(e) => setRefinement(e.target.value)}
+              placeholder={
+                'e.g. "Make the elevator pitch punchier and under 45 seconds" · "Replace story 3 with my POS migration project" · "Add a difficult question about my 6-month career break" · "Make the questions for interviewers more specific to their Southeast Asia expansion"'
+              }
+            />
+            <div className="flex items-center gap-3">
+              <button
+                className="btn-primary"
+                onClick={applyRefinement}
+                disabled={refine.loading || !refinement.trim()}
+              >
+                {refine.loading ? "Amending…" : "Apply changes"}
+              </button>
+              {refined && (
+                <span className="text-sm font-medium text-emerald-700">
+                  Pack updated ✓
+                </span>
+              )}
+            </div>
+            {refine.error && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {refine.error}
+              </div>
+            )}
           </section>
         </div>
       )}
