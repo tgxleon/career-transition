@@ -4,6 +4,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod/v4";
 import {
   SYSTEM_PROMPT,
+  auditPrompt,
   coverLetterPrompt,
   fitPrompt,
   followUpPrompt,
@@ -21,6 +22,12 @@ import { checkRateLimit, clientIp } from "@/lib/ratelimit";
 export const maxDuration = 300;
 
 const MODEL = "claude-opus-4-8";
+
+const KnockoutSchema = z.object({
+  requirement: z.string(),
+  status: z.enum(["met", "unclear", "not_met"]),
+  note: z.string(),
+});
 
 const FitSchema = z.object({
   score: z
@@ -44,14 +51,59 @@ const FitSchema = z.object({
     z.object({
       competency: z.string(),
       severity: z.enum(["low", "medium", "high"]),
+      closableByRewording: z
+        .boolean()
+        .describe(
+          "true if closable by rewording existing experience, false if a genuine gap"
+        ),
       mitigation: z
         .string()
         .describe("Concrete, actionable way to address or reframe this gap"),
     })
   ),
-  atsKeywords: z
+  mustHaveKeywords: z
+    .array(
+      z.object({
+        keyword: z.string(),
+        inResume: z
+          .boolean()
+          .describe(
+            "whether the current resume already contains this term or an obvious variant"
+          ),
+      })
+    )
+    .describe("Hard keywords an ATS/recruiter search will match on"),
+  niceToHaveKeywords: z.array(z.string()),
+  knockouts: z
+    .array(KnockoutSchema)
+    .describe("Non-negotiable requirements and whether the candidate meets them"),
+  reorderingPlan: z
     .array(z.string())
-    .describe("Keywords from the job description the resume should contain"),
+    .describe(
+      "3-6 specific moves to put the strongest material in the resume's top third"
+    ),
+});
+
+const AuditSchema = z.object({
+  coverageScore: z
+    .number()
+    .describe("0-100 keyword/skills coverage of the tailored resume"),
+  verdict: z
+    .string()
+    .describe("One line: ready to send, or needs the punch list first"),
+  missingKeywords: z
+    .array(z.string())
+    .describe("Must-have terms still missing or buried"),
+  readabilityFlags: z
+    .array(z.string())
+    .describe("Anything that could scramble in ATS parsing; empty if clean"),
+  knockouts: z.array(KnockoutSchema),
+  punchList: z.array(
+    z.object({
+      priority: z.enum(["high", "medium", "low"]),
+      fix: z.string(),
+    })
+  ),
 });
 
 const PrepSchema = z.object({
@@ -105,6 +157,7 @@ interface AiRequest {
   task:
     | "fit"
     | "resume"
+    | "audit"
     | "cover_letter"
     | "interview_prep"
     | "vibe_check"
@@ -114,6 +167,15 @@ interface AiRequest {
   profile: ProfileContext;
   reflection?: ReflectionContext;
   context?: string;
+  /** Strategist output (from a prior fit analysis) to steer the resume rewrite */
+  fit?: {
+    mustHaveKeywords?: { keyword: string; inResume: boolean }[];
+    reorderingPlan?: string[];
+  };
+  /** Punch-list fixes from a prior audit to apply on regeneration */
+  punchList?: string[];
+  /** The tailored resume text to audit */
+  resume?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -201,13 +263,50 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ data: response.parsed_output });
       }
+      case "audit": {
+        if (!body.resume) {
+          return NextResponse.json(
+            { error: "No tailored resume to audit — generate one first." },
+            { status: 400 }
+          );
+        }
+        const response = await client.messages.parse({
+          model: MODEL,
+          max_tokens: 16000,
+          thinking: { type: "adaptive" },
+          system: SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: auditPrompt(body.job, body.profile, body.resume),
+            },
+          ],
+          output_config: { format: zodOutputFormat(AuditSchema) },
+        });
+        if (response.stop_reason === "refusal") {
+          return refusal();
+        }
+        return NextResponse.json({ data: response.parsed_output });
+      }
       case "resume":
       case "cover_letter":
       case "thank_you":
       case "follow_up": {
         const prompt =
           body.task === "resume"
-            ? resumePrompt(body.job, body.profile)
+            ? resumePrompt(
+                body.job,
+                body.profile,
+                body.fit
+                  ? {
+                      missingMustHaves: body.fit.mustHaveKeywords
+                        ?.filter((k) => !k.inResume)
+                        .map((k) => k.keyword),
+                      reorderingPlan: body.fit.reorderingPlan,
+                    }
+                  : undefined,
+                body.punchList
+              )
             : body.task === "cover_letter"
               ? coverLetterPrompt(body.job, body.profile)
               : body.task === "thank_you"

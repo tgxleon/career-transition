@@ -32,7 +32,21 @@ export interface FitStrength {
 export interface FitGap {
   competency: string;
   severity: "low" | "medium" | "high";
+  /** true = closable by rewording existing experience; false = genuine gap */
+  closableByRewording?: boolean;
   mitigation: string;
+}
+
+export interface KeywordCheck {
+  keyword: string;
+  /** whether the candidate's current resume already contains this term */
+  inResume: boolean;
+}
+
+export interface KnockoutCheck {
+  requirement: string;
+  status: "met" | "unclear" | "not_met";
+  note: string;
 }
 
 export interface FitAnalysis {
@@ -41,7 +55,25 @@ export interface FitAnalysis {
   summary: string;
   strengths: FitStrength[];
   gaps: FitGap[];
-  atsKeywords: string[];
+  /** Scout: hard keywords the ATS/recruiter search will match on */
+  mustHaveKeywords?: KeywordCheck[];
+  niceToHaveKeywords?: string[];
+  /** Scout: non-negotiable requirements (certs, visas, years, licences) */
+  knockouts?: KnockoutCheck[];
+  /** Strategist: what to move into the resume's top third */
+  reorderingPlan?: string[];
+  /** legacy field from analyses generated before the 3-step pipeline */
+  atsKeywords?: string[];
+  generatedAt: string;
+}
+
+export interface ResumeAudit {
+  coverageScore: number;
+  verdict: string;
+  missingKeywords: string[];
+  readabilityFlags: string[];
+  knockouts: KnockoutCheck[];
+  punchList: { priority: "high" | "medium" | "low"; fix: string }[];
   generatedAt: string;
 }
 
@@ -112,6 +144,7 @@ export interface Job {
   updatedAt: string;
   fit?: FitAnalysis;
   tailoredResume?: string;
+  resumeAudit?: ResumeAudit;
   coverLetter?: string;
   interviewPrep?: InterviewPrep;
   reflection?: Reflection;

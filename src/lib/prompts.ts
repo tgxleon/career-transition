@@ -53,30 +53,107 @@ ${profile.background ? `\nCareer background & transition context (in the candida
 export const SYSTEM_PROMPT = `You are an experienced career coach and recruiter who has reviewed thousands of resumes and sat on hiring panels across industries. You help job seekers — especially career changers — present their genuine experience in the strongest honest light. You never fabricate experience, employers, credentials, dates, or metrics that are not in the candidate's materials; where evidence is thin you say so and suggest how the candidate can honestly address it. You write in clear, natural language without clichés ("passionate", "results-driven", "synergy") and you calibrate advice to the specific job description rather than giving generic tips.`;
 
 export function fitPrompt(job: JobContext, profile: ProfileContext): string {
-  return `Assess how well this candidate fits this job.
+  return `You are acting as two specialists in sequence: first a Scout who builds the target profile from the job description, then a Strategist who scores the candidate against it and plans the attack.
 
 ${jobBlock(job)}
 
 ${profileBlock(profile)}
 
-Score fit out of 100 (calibrate honestly: 80+ means "strong candidate, apply with confidence", 60–79 "credible with gaps to address", 40–59 "stretch — needs a strong narrative", below 40 "significant mismatch"). Identify the competencies the job actually requires (read between the lines of the description, not just the listed requirements), map the candidate's evidence against each, and surface gaps with severity and a concrete mitigation the candidate can act on (a resume framing, a skill to brush up, a story to prepare). Also extract the ATS keywords from the job description that the candidate's resume should contain.`;
+SCOUT — build the target profile from the job description:
+1. Extract the must-have keywords: the concrete terms a recruiter's ranked search or an ATS keyword match would filter on (skills, tools, methodologies, domain terms, credentials — the exact phrasing the posting uses). For EACH one, check whether the candidate's current resume already contains it (or an obvious variant) and mark it present or missing.
+2. Extract nice-to-have keywords: terms that boost ranking but won't knock the candidate out.
+3. Identify knockout requirements: non-negotiables like years of experience, certifications, licences, work authorisation, education minimums. For each, judge from the resume whether it is met, unclear, or not met, with a short note.
+
+STRATEGIST — score and plan:
+4. Score overall fit out of 100. Calibrate honestly: 80+ "strong candidate, apply with confidence", 60–79 "credible with gaps to address", 40–59 "stretch — needs a strong narrative", below 40 "significant mismatch". Weigh keyword/skills coverage, knockouts, and the strength of underlying evidence — not keyword count alone.
+5. Map the competencies the job actually requires (read between the lines, not just the listed requirements) against the candidate's concrete evidence — these are the strengths.
+6. Find the real gaps, and for each be honest about whether it is closable by rewording experience the candidate already has (closableByRewording: true) or a genuine gap (false). Give severity and a concrete mitigation: a reframing, a skill to brush up, a story to prepare.
+7. Give a reordering plan: which sections, roles, and bullets to move up so the strongest, most relevant experience sits in the top third of the resume, where recruiters and ATS ranking both weight most. 3–6 specific, actionable moves.
+
+Do not invent experience the candidate does not have.`;
 }
 
-export function resumePrompt(job: JobContext, profile: ProfileContext): string {
-  return `Rewrite the candidate's master resume tailored to this specific job, in an ATS-friendly format.
+export interface StrategistBrief {
+  missingMustHaves?: string[];
+  reorderingPlan?: string[];
+}
+
+export function resumePrompt(
+  job: JobContext,
+  profile: ProfileContext,
+  strategist?: StrategistBrief,
+  punchList?: string[]
+): string {
+  return `You are the Surgeon: rewrite the candidate's master resume tailored to this specific job, in an ATS-safe format.
 
 ${jobBlock(job)}
 
 ${profileBlock(profile)}
+${
+    strategist &&
+    ((strategist.missingMustHaves?.length ?? 0) > 0 ||
+      (strategist.reorderingPlan?.length ?? 0) > 0)
+      ? `<strategist_plan>
+${
+          strategist.missingMustHaves?.length
+            ? `Must-have keywords currently MISSING from the resume — weave these in, but ONLY where the candidate genuinely has the experience (skip any that would be a lie):
+${strategist.missingMustHaves.map((k) => `- ${k}`).join("\n")}`
+            : ""
+        }
+${
+          strategist.reorderingPlan?.length
+            ? `Reordering plan (put the strongest material in the top third):
+${strategist.reorderingPlan.map((r) => `- ${r}`).join("\n")}`
+            : ""
+        }
+</strategist_plan>`
+      : ""
+  }
+${
+    punchList?.length
+      ? `<audit_punch_list>
+A previous audit of the last draft flagged these fixes — apply them:
+${punchList.map((p) => `- ${p}`).join("\n")}
+</audit_punch_list>`
+      : ""
+  }
 
-Requirements:
-- Output the complete resume as clean Markdown (single column, standard section headings: Summary, Experience, Education, Skills, plus Certifications/Projects if relevant). No tables, no columns, no images — ATS parsers must read it linearly.
+Rules:
+- Rewrite every bullet in the XYZ format — "Accomplished [X] as measured by [Y] by doing [Z]" — or as close to it as the material honestly allows. Where a metric plausibly exists but isn't in the master resume, insert an explicit [add metric] placeholder rather than inventing a number.
+- Weave in the must-have keywords from the job description in natural language, never stuffed, and only where genuinely true for this candidate.
+- Strip everything that breaks ATS parsing: output clean Markdown, single column, standard headings (Summary, Experience, Skills, Education, plus Certifications/Projects if relevant). No tables, no columns, no images or graphics.
 - Open with a 2–3 line professional summary written for THIS role.
-- Reorder and reword bullet points to front-load the experience most relevant to this job description; naturally weave in the exact keywords and phrasing from the posting where the candidate genuinely has that experience.
-- Keep every bullet truthful to the master resume — sharpen wording and emphasis, never invent scope, numbers, or responsibilities.
-- Use strong verbs and, where the master resume provides them, quantified results.
-- Standard reverse-chronological order, consistent date formats.
+- Front-load relevance: the top third of the resume carries the strongest, most job-relevant material.
+- Keep every line truthful to the master resume — sharpen wording and emphasis, never invent scope, numbers, employers, dates, or responsibilities.
+- Standard reverse-chronological order, consistent date formats, tight length (equivalent of 1–2 pages).
 - After the resume, add a short "--- \n## Tailoring notes" section listing what you changed and which JD keywords you worked in, so the candidate can review the choices.`;
+}
+
+export function auditPrompt(
+  job: JobContext,
+  profile: ProfileContext,
+  resume: string
+): string {
+  return `You are the Auditor — the strict final check before the candidate applies. Your job is to catch what the earlier steps missed. Be strict; do not rubber-stamp.
+
+${jobBlock(job)}
+
+<tailored_resume>
+${resume}
+</tailored_resume>
+
+<candidate_background>
+${profile.background || "(none provided)"}
+</candidate_background>
+
+Audit the tailored resume against the job description:
+1. Keyword coverage: score 0–100 how well the resume covers the keywords and skills a recruiter's ranked search / ATS match would use for THIS posting, and list any must-have term still missing or buried (mentioned once in passing where it should be prominent).
+2. Machine-readability: flag anything that could scramble in ATS parsing — remaining tables or columns, unusual characters, non-standard section headings, contact info that looks like a header/footer, date format inconsistencies. If it's clean, say so with an empty list.
+3. Knockout requirements: for each non-negotiable in the posting (years, certifications, licences, education, work authorisation), state whether this resume clearly demonstrates it (met), leaves it ambiguous (unclear), or doesn't (not_met) — with a short note on how to address it honestly.
+4. Punch list: a prioritized list of the final fixes (high/medium/low) that would push this resume highest in a recruiter's ranked search. Concrete edits, not platitudes.
+5. One-line overall verdict: ready to send, or needs the punch list first.
+
+Never suggest inventing experience — every fix must be achievable with the candidate's real background.`;
 }
 
 export function coverLetterPrompt(
