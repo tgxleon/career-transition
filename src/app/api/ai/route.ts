@@ -225,16 +225,25 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ data: response.parsed_output });
       }
       case "interview_prep": {
-        const response = await client.messages.parse({
-          model: MODEL,
-          max_tokens: 32000,
-          thinking: { type: "adaptive" },
-          system: SYSTEM_PROMPT,
-          messages: [
-            { role: "user", content: interviewPrepPrompt(body.job, body.profile) },
-          ],
-          output_config: { format: zodOutputFormat(PrepSchema) },
-        });
+        // Kept at 16000 non-streaming: larger budgets trip the SDK's
+        // "streaming required" guard, and Vercel caps the function at 300s
+        // anyway. The explicit timeout stays inside that cap.
+        const response = await client.messages.parse(
+          {
+            model: MODEL,
+            max_tokens: 16000,
+            thinking: { type: "adaptive" },
+            system: SYSTEM_PROMPT,
+            messages: [
+              {
+                role: "user",
+                content: interviewPrepPrompt(body.job, body.profile),
+              },
+            ],
+            output_config: { format: zodOutputFormat(PrepSchema) },
+          },
+          { timeout: 280_000 }
+        );
         if (response.stop_reason === "refusal") {
           return refusal();
         }
