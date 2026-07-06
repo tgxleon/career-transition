@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStore } from "@/lib/store";
-import { Job, KnockoutCheck, ResumeAudit } from "@/lib/types";
+import { FitAnalysis, Job, KnockoutCheck, ResumeAudit } from "@/lib/types";
 import { jobContext, profileContext, useAi } from "@/lib/ai-client";
 import { downloadDocx, downloadPdf, safeFilename } from "@/lib/resume-export";
 import Markdown from "@/components/Markdown";
@@ -54,45 +54,69 @@ const PRIORITY_STYLE: Record<string, string> = {
   low: "bg-gray-100 text-gray-600",
 };
 
-function Stepper({ job }: { job: Job }) {
+type PipelineStage = "fit" | "draft" | "audit" | null;
+
+function Stepper({ job, active }: { job: Job; active: PipelineStage }) {
   const steps = [
-    { n: 1, label: "Analyse fit", done: !!job.fit },
-    { n: 2, label: "Tailor resume", done: !!job.tailoredResume },
+    { n: 1, label: "Analyse fit", done: !!job.fit, stage: "fit" as const },
+    {
+      n: 2,
+      label: "Tailor resume",
+      done: !!job.tailoredResume,
+      stage: "draft" as const,
+    },
     // a stale audit belongs to a previous draft — step 3 is no longer done
-    { n: 3, label: "Final audit", done: !!job.resumeAudit && !job.resumeAudit.stale },
+    {
+      n: 3,
+      label: "Final audit",
+      done: !!job.resumeAudit && !job.resumeAudit.stale,
+      stage: "audit" as const,
+    },
   ];
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {steps.map((s, i) => (
-        <div key={s.n} className="flex items-center gap-2">
-          <div
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
-              s.done
-                ? "bg-emerald-50 text-emerald-800"
-                : "bg-gray-100 text-gray-500"
-            }`}
-          >
-            <span
-              className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
-                s.done ? "bg-emerald-600 text-white" : "bg-gray-300 text-white"
+      {steps.map((s, i) => {
+        const running = active === s.stage;
+        return (
+          <div key={s.n} className="flex items-center gap-2">
+            <div
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+                running
+                  ? "animate-pulse bg-indigo-100 text-indigo-800"
+                  : s.done
+                    ? "bg-emerald-50 text-emerald-800"
+                    : "bg-gray-100 text-gray-500"
               }`}
             >
-              {s.done ? "✓" : s.n}
-            </span>
-            {s.label}
+              <span
+                className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                  running
+                    ? "bg-indigo-600 text-white"
+                    : s.done
+                      ? "bg-emerald-600 text-white"
+                      : "bg-gray-300 text-white"
+                }`}
+              >
+                {running ? "…" : s.done ? "✓" : s.n}
+              </span>
+              {s.label}
+              {running && "…"}
+            </div>
+            {i < steps.length - 1 && <span className="text-gray-300">→</span>}
           </div>
-          {i < steps.length - 1 && <span className="text-gray-300">→</span>}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 export default function ResumeCoverTab({ job }: { job: Job }) {
   const { profile, updateJob } = useStore();
+  const fitAi = useAi<Omit<FitAnalysis, "generatedAt">>();
   const resumeAi = useAi<string>();
   const coverAi = useAi<string>();
   const auditAi = useAi<Omit<ResumeAudit, "generatedAt">>();
+  const [stage, setStage] = useState<PipelineStage>(null);
   const [editingResume, setEditingResume] = useState(false);
   const [editingCover, setEditingCover] = useState(false);
   // Cover letter is optional — only show the section once the user opts in
@@ -175,6 +199,55 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
     }
   };
 
+  // One-click journey: analyse fit → draft resume → audit the draft, saved
+  // incrementally so a mid-chain failure keeps earlier results. An existing
+  // fit analysis is reused rather than re-billed.
+  const runPipeline = async () => {
+    let fit = job.fit;
+    try {
+      if (!fit) {
+        setStage("fit");
+        const f = await fitAi.run({
+          task: "fit",
+          job: jobContext(job),
+          profile: profileContext(profile),
+        });
+        if (!f) return;
+        fit = { ...f, generatedAt: new Date().toISOString() };
+        updateJob(job.id, { fit });
+      }
+
+      setStage("draft");
+      const draft = await resumeAi.run({
+        task: "resume",
+        job: jobContext(job),
+        profile: profileContext(profile),
+        fit: {
+          mustHaveKeywords: fit.mustHaveKeywords,
+          reorderingPlan: fit.reorderingPlan,
+        },
+      });
+      if (!draft) return;
+      updateJob(job.id, { tailoredResume: draft, appliedFixes: undefined });
+
+      setStage("audit");
+      const aud = await auditAi.run({
+        task: "audit",
+        job: jobContext(job),
+        profile: profileContext(profile),
+        resume: draft,
+      });
+      if (!aud) return;
+      updateJob(job.id, {
+        resumeAudit: { ...aud, generatedAt: new Date().toISOString() },
+      });
+    } finally {
+      setStage(null);
+    }
+  };
+
+  const pipelineBusy = stage !== null;
+
   const generateCover = async () => {
     const data = await coverAi.run({
       task: "cover_letter",
@@ -186,7 +259,73 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
 
   return (
     <div className="space-y-5">
-      <Stepper job={job} />
+      <Stepper job={job} active={stage} />
+
+      {/* One-click journey: analyse → draft → audit in a single run.
+          Stays mounted mid-run: the draft saves at stage 2, which would
+          otherwise unmount the progress indicator before the audit. */}
+      {(!resume || pipelineBusy) && (
+        <div className="card border-indigo-200 bg-indigo-50/40">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">
+                One click: analyse, draft &amp; audit
+              </h2>
+              <p className="text-sm text-gray-600">
+                Runs the whole journey in one go — scores your fit and
+                proposes changes with reasons, drafts the ATS resume, then
+                audits the draft. You review the audit, tick the fixes you
+                agree with, and regenerate <strong>once</strong>.
+              </p>
+              {!canRun && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Needs the job description (Overview tab) and your master
+                  resume (Settings) first.
+                </p>
+              )}
+            </div>
+            <button
+              className="btn-primary"
+              onClick={runPipeline}
+              disabled={pipelineBusy || !canRun}
+            >
+              {stage === "fit"
+                ? "1/3 Analysing fit…"
+                : stage === "draft"
+                  ? "2/3 Drafting resume…"
+                  : stage === "audit"
+                    ? "3/3 Auditing draft…"
+                    : job.fit
+                      ? "Draft & audit (fit already done)"
+                      : "Analyse, draft & audit"}
+            </button>
+          </div>
+          {fitAi.error && (
+            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {fitAi.error}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compact fit summary — the "why" behind the proposed changes */}
+      {job.fit && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-semibold">
+              Fit {job.fit.score}
+              <span className="font-normal text-gray-400">/100</span>
+            </span>
+            <span className="text-gray-600">{job.fit.verdict}</span>
+          </div>
+          <Link
+            href={`/jobs/${job.id}?tab=fit`}
+            className="text-indigo-700 hover:underline"
+          >
+            Why — gaps, keywords &amp; plan →
+          </Link>
+        </div>
+      )}
 
       {/* ATS resume */}
       <div className="card flex flex-wrap items-center justify-between gap-3">
@@ -231,7 +370,7 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           <button
             className="btn-primary"
             onClick={() => generateResume(false)}
-            disabled={resumeAi.loading || !canRun}
+            disabled={resumeAi.loading || pipelineBusy || !canRun}
           >
             {resumeAi.loading
               ? "Tailoring… (can take a minute)"
@@ -301,7 +440,7 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
             <button
               className="btn-primary"
               onClick={runAudit}
-              disabled={auditAi.loading}
+              disabled={auditAi.loading || pipelineBusy}
             >
               {auditAi.loading
                 ? "Auditing…"
