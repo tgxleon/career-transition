@@ -226,7 +226,12 @@ export async function POST(req: NextRequest) {
           thinking: { type: "adaptive" },
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: fitPrompt(body.job, body.profile) }],
-          output_config: { format: zodOutputFormat(FitSchema) },
+          // medium effort: keeps requests inside serverless time limits —
+          // a completed analysis beats a deeper one that times out
+          output_config: {
+            effort: "medium",
+            format: zodOutputFormat(FitSchema),
+          },
         });
         if (response.stop_reason === "refusal") {
           return refusal();
@@ -311,7 +316,10 @@ export async function POST(req: NextRequest) {
               ),
             },
           ],
-          output_config: { format: zodOutputFormat(VibeSchema) },
+          output_config: {
+            effort: "medium",
+            format: zodOutputFormat(VibeSchema),
+          },
         });
         if (response.stop_reason === "refusal") {
           return refusal();
@@ -336,7 +344,10 @@ export async function POST(req: NextRequest) {
               content: auditPrompt(body.job, body.profile, body.resume),
             },
           ],
-          output_config: { format: zodOutputFormat(AuditSchema) },
+          output_config: {
+            effort: "medium",
+            format: zodOutputFormat(AuditSchema),
+          },
         });
         if (response.stop_reason === "refusal") {
           return refusal();
