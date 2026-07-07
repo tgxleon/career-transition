@@ -4,6 +4,7 @@ import "./globals.css";
 import { StoreProvider } from "@/lib/store";
 import Nav from "@/components/Nav";
 import AppShell from "@/components/AppShell";
+import GenerationGuard from "@/components/GenerationGuard";
 
 // LE CAMP style system: Bricolage Grotesque substitutes for Agrandir
 // (display voice), DM Sans is the workhorse, DM Mono the wayfinding voice.
@@ -43,6 +44,7 @@ export default function RootLayout({
         <StoreProvider>
           <Nav />
           <AppShell>{children}</AppShell>
+          <GenerationGuard />
         </StoreProvider>
       </body>
     </html>

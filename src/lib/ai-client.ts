@@ -1,7 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Job, Profile, Reflection } from "./types";
+
+// Global count of in-flight AI generations, so the app can warn before the
+// user navigates away mid-generation (a page unload kills the request).
+let activeGenerations = 0;
+const activityListeners = new Set<() => void>();
+
+function bumpActivity(delta: number) {
+  activeGenerations += delta;
+  activityListeners.forEach((l) => l());
+}
+
+function subscribeActivity(listener: () => void) {
+  activityListeners.add(listener);
+  return () => activityListeners.delete(listener);
+}
+
+export function useAiActivity(): boolean {
+  return useSyncExternalStore(
+    subscribeActivity,
+    () => activeGenerations > 0,
+    () => false
+  );
+}
 
 export function jobContext(job: Job) {
   return {
@@ -36,6 +59,7 @@ export function useAi<T>() {
   const run = async (payload: Record<string, unknown>): Promise<T | null> => {
     setLoading(true);
     setError(null);
+    bumpActivity(1);
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
@@ -59,6 +83,7 @@ export function useAi<T>() {
       }
       return null;
     } finally {
+      bumpActivity(-1);
       setLoading(false);
     }
   };

@@ -168,8 +168,9 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           : undefined,
     });
     if (data) {
-      // Keep the previous audit visible but mark it stale (it audited the
-      // old draft), and record which fixes went into this draft.
+      // Record which fixes went into this draft, mark any previous audit
+      // stale, then immediately audit the fresh draft so tailoring and
+      // audit arrive together as one step.
       const appliedNow =
         applyPunchList && audit
           ? audit.punchList
@@ -181,6 +182,22 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
         resumeAudit: audit ? { ...audit, stale: true } : undefined,
         appliedFixes: appliedNow,
       });
+      setStage("audit");
+      try {
+        const aud = await auditAi.run({
+          task: "audit",
+          job: jobContext(job),
+          profile: profileContext(profile),
+          resume: data,
+        });
+        if (aud) {
+          updateJob(job.id, {
+            resumeAudit: { ...aud, generatedAt: new Date().toISOString() },
+          });
+        }
+      } finally {
+        setStage(null);
+      }
     }
   };
 
@@ -308,22 +325,14 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
         </div>
       )}
 
-      {/* Compact fit summary — the "why" behind the proposed changes */}
+      {/* Compact fit summary */}
       {job.fit && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-semibold">
-              Fit {job.fit.score}
-              <span className="font-normal text-gray-400">/100</span>
-            </span>
-            <span className="text-gray-600">{job.fit.verdict}</span>
-          </div>
-          <Link
-            href={`/jobs/${job.id}?tab=fit`}
-            className="text-indigo-700 hover:underline"
-          >
-            Why — gaps, keywords &amp; plan →
-          </Link>
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm">
+          <span className="font-semibold">
+            Fit {job.fit.score}
+            <span className="font-normal text-gray-400">/100</span>
+          </span>
+          <span className="text-gray-600">{job.fit.verdict}</span>
         </div>
       )}
 
@@ -337,7 +346,8 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           <p className="text-sm text-gray-500">
             Rewrites your master resume for this posting: XYZ-format bullets,
             single-column ATS format, missing must-have keywords woven in where
-            true — with tailoring notes explaining every change.
+            true — with tailoring notes explaining every change. The final
+            audit runs automatically on every new draft.
           </p>
           {!canRun && (
             <p className="mt-1 text-xs text-amber-700">
@@ -374,8 +384,8 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
           >
             {resumeAi.loading
               ? "Tailoring… (can take a minute)"
-              : resume
-                ? "Regenerate"
+              : stage === "audit"
+                ? "Auditing draft…"
                 : "Tailor resume"}
           </button>
         </div>
@@ -432,9 +442,10 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
               </div>
               <h2 className="font-semibold">Final audit</h2>
               <p className="text-sm text-gray-500">
-                A strict last check before you apply: keyword coverage of the
-                tailored draft, machine-readability flags, knockout
-                requirements, and a prioritized punch list of final fixes.
+                Runs automatically after every tailoring — keyword coverage of
+                the draft, machine-readability flags, knockout requirements,
+                and a prioritized punch list. Use the button to re-check after
+                manual edits.
               </p>
             </div>
             <button
@@ -576,7 +587,9 @@ export default function ResumeCoverTab({ job }: { job: Job }) {
                       <button
                         className="btn-secondary text-xs"
                         onClick={() => generateResume(true)}
-                        disabled={resumeAi.loading || selectedCount === 0}
+                        disabled={
+                          resumeAi.loading || pipelineBusy || selectedCount === 0
+                        }
                       >
                         {resumeAi.loading
                           ? "Applying…"
